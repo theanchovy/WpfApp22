@@ -11,6 +11,9 @@ public class Event
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public DateTime? EventDate { get; set; }
+    public DateTime EventDate { get; set; }
     public bool IsHoliday { get; set; }
+
+    // Флаг для отслеживания показа уведомления
+    public bool IsNotificationShown { get; set; } = false;
 }

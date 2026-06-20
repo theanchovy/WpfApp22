@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace WpfApp22
 {
@@ -12,6 +13,9 @@ namespace WpfApp22
         private bool _isDescriptionPlaceholder = true;
         private readonly ApiService _apiService = new();
         private Event? _selectedEvent; // Для редактирования
+        private DispatcherTimer _notificationTimer;
+        private bool _isShowingNotification = false;
+        private HashSet<int> _shownNotificationIds = new HashSet<int>();
 
         public MainWindow()
         {
@@ -44,6 +48,31 @@ namespace WpfApp22
             // Инициализация placeholder’ов
             UpdatePlaceholderVisibility();
             UpdateDescriptionPlaceholderVisibility();
+
+            // Инициализация сервисов
+            _apiService = new ApiService();
+
+            // Настройка таймера уведомлений
+            _notificationTimer = new DispatcherTimer();
+            _notificationTimer.Interval = TimeSpan.FromSeconds(5);
+            _notificationTimer.Tick += CheckForNotifications;
+            _notificationTimer.Start();
+
+            // Инициализация часов (0–23)
+            for (int i = 0; i < 24; i++)
+            {
+                HourComboBox.Items.Add(i.ToString("D2"));
+            }
+            HourComboBox.SelectedIndex = DateTime.Now.Hour;
+
+            // Инициализация минут (0–59)
+            for (int i = 0; i < 60; i += 5) // С шагом 5 для удобства
+            {
+                MinuteComboBox.Items.Add(i.ToString("D2"));
+            }
+            MinuteComboBox.SelectedIndex = (DateTime.Now.Minute / 5);
+
+            LoadUpcomingEventsAsync();
         }
 
         // Асинхронный метод загрузки данных
@@ -53,10 +82,79 @@ namespace WpfApp22
             {
                 var events = await _apiService.GetUpcomingEventsAsync();
                 EventsList.ItemsSource = events;
+
+                // Инициализируем кэш: добавляем ID событий, для которых уведомление уже показано
+                foreach (var @event in events)
+                {
+                    if (@event.IsNotificationShown)
+                    {
+                        _shownNotificationIds.Add(@event.Id);
+                    }
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}");
+            }
+        }
+
+        // Метод проверки уведомлений
+        private async void CheckForNotifications(object sender, EventArgs e)
+        {
+            if (_isShowingNotification)
+                return;
+
+            try
+            {
+                var upcomingEvents = await _apiService.GetUpcomingEventsAsync();
+                var eventsToNotify = upcomingEvents.Where(e =>
+                    !e.IsNotificationShown &&
+                    !_shownNotificationIds.Contains(e.Id) &&
+                    (
+                        // Уведомление за 24 часа (сутки)
+                        (e.EventDate - DateTime.Now).TotalHours <= 24 &&
+                        (e.EventDate - DateTime.Now).TotalHours > 0 ||
+                        // Уведомление за 5 минут
+                        (e.EventDate - DateTime.Now).TotalMinutes <= 5 &&
+                        (e.EventDate - DateTime.Now).TotalMinutes > 0
+                    )).ToList();
+
+                if (eventsToNotify.Count == 0)
+                    return;
+
+                foreach (var @event in eventsToNotify)
+                {
+                    _isShowingNotification = true;
+
+                    // Определяем тип уведомления
+                    string notificationType;
+                    if ((@event.EventDate - DateTime.Now).TotalHours <= 24)
+                    {
+                        notificationType = ""; //за 24 часа
+                    }
+                    else
+                    {
+                        notificationType = ""; //за 5 минут
+                    }
+
+                    MessageBox.Show(
+                        $"Скоро событие: {@event.Title}\n" +
+                        $"Время: {@event.EventDate:dd.MM.yyyy HH:mm}\n" +
+                        $"Уведомление! {notificationType}",
+                        "Напоминание о событии");
+
+                    _shownNotificationIds.Add(@event.Id);
+                    _isShowingNotification = false;
+
+                    // Обновляем флаг в API
+                    @event.IsNotificationShown = true;
+                    await _apiService.UpdateEventAsync(@event);
+                }
+            }
+            catch (Exception ex)
+            {
+                _isShowingNotification = false;
+                MessageBox.Show($"Ошибка проверки уведомлений: {ex.Message}");
             }
         }
 
@@ -185,10 +283,25 @@ namespace WpfApp22
                 return;
             }
 
+            // Собираем дату и время
+            var selectedDate = DatePicker.SelectedDate.Value;
+            var hour = int.Parse(HourComboBox.SelectedItem?.ToString() ?? "0");
+            var minute = int.Parse(MinuteComboBox.SelectedItem?.ToString() ?? "0");
+
+            var eventDateTime = new DateTime
+            (
+                selectedDate.Year,
+                selectedDate.Month,
+                selectedDate.Day,
+                hour,
+                minute,
+                0
+            );
+
             var newEvent = new Event
             {
                 Title = TitleTextBox.Text,
-                EventDate = DatePicker.SelectedDate.Value,
+                EventDate = eventDateTime,
                 IsHoliday = IsHolidayCheckBox.IsChecked ?? false,
                 Description = DescriptionTextBox.Text
             };
@@ -217,6 +330,12 @@ namespace WpfApp22
             {
                 Mouse.OverrideCursor = null;
             }
+
+            if (eventDateTime < DateTime.Now)
+            {
+                MessageBox.Show("Дата и время события не могут быть в прошлом");
+                return;
+            }
         }
 
         private void HideEventDialog()
@@ -235,7 +354,6 @@ namespace WpfApp22
 
             _selectedEvent = null;
         }
-
         // Обработчики событий для поля «Название»
         private void TitleTextBox_TextChanged(object sender, TextChangedEventArgs e) => UpdatePlaceholderVisibility();
         private void TitleTextBox_GotFocus(object sender, RoutedEventArgs e) => UpdatePlaceholderVisibility();
@@ -288,6 +406,17 @@ namespace WpfApp22
                 DescriptionTextBox.Foreground = Brushes.Black;
                 _isDescriptionPlaceholder = false;
             }
+        }
+
+        /// <summary>
+        /// Переопределяем метод OnClosed для корректного завершения работы таймера
+        /// </summary>
+        protected override void OnClosed(EventArgs e)
+        {
+            base.OnClosed(e);
+
+            // Останавливаем таймер уведомлений
+            _notificationTimer?.Stop();
         }
     }
 }
