@@ -6,8 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
-namespace WpfApp22;
-
+namespace WpfApp22
+{
 public class ApiService
 {
     private readonly HttpClient _httpClient;
@@ -19,7 +19,7 @@ public class ApiService
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,
-        Converters = { new DateTimeConverterUsingDateTimeParse() }
+        //Converters = { new DateTimeConverterUsingDateTimeParse() }
     };
 
     public async Task<List<Event>> GetUpcomingEventsAsync()
@@ -35,19 +35,6 @@ public class ApiService
         catch (HttpRequestException ex)
         {
             throw new Exception($"Ошибка подключения к API: {ex.Message}", ex);
-        }
-    }
-
-    public class DateTimeConverterUsingDateTimeParse : JsonConverter<DateTime>
-    {
-        public override DateTime Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return DateTime.Parse(reader.GetString()!);
-        }
-
-        public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options)
-        {
-            writer.WriteStringValue(value.ToString("yyyy-MM-ddTHH:mm:ss"));
         }
     }
 
@@ -84,5 +71,43 @@ public class ApiService
     {
         var response = await _httpClient.DeleteAsync($"{BaseUrl}/{eventId}");
         response.EnsureSuccessStatusCode();
+    }
+
+
+        public async Task<List<Event>> SearchEventsAsync(string searchTerm, DateTime? dateFrom = null, DateTime? dateTo = null)
+        {
+            try
+            {
+                var queryParams = new List<string>();
+                if (!string.IsNullOrWhiteSpace(searchTerm))
+                    queryParams.Add($"searchTerm={Uri.EscapeDataString(searchTerm)}");
+
+                if (dateFrom.HasValue)
+                {
+                    // Преобразуем в UTC
+                    var utcFrom = dateFrom.Value.ToUniversalTime();
+                    queryParams.Add($"dateFrom={utcFrom:yyyy-MM-ddTHH:mm:ssZ}");
+                }
+
+                if (dateTo.HasValue)
+                {
+                    var utcTo = dateTo.Value.ToUniversalTime();
+                    queryParams.Add($"dateTo={utcTo:yyyy-MM-ddTHH:mm:ssZ}");
+                }
+
+                var url = $"{BaseUrl}/search?" + string.Join("&", queryParams);
+                System.Diagnostics.Debug.WriteLine($"Запрос: {url}");
+
+                var response = await _httpClient.GetAsync(url);
+                response.EnsureSuccessStatusCode();
+                var json = await response.Content.ReadAsStringAsync();
+                return JsonSerializer.Deserialize<List<Event>>(json, _serializerOptions)
+                       ?? new List<Event>();
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new Exception($"Ошибка поиска: {ex.Message}", ex);
+            }
+        }
     }
 }

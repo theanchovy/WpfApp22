@@ -11,15 +11,20 @@ namespace WpfApp22
     {
         private bool _isTitlePlaceholder = true;
         private bool _isDescriptionPlaceholder = true;
-        private readonly ApiService _apiService = new();
         private Event? _selectedEvent; // Для редактирования
         private DispatcherTimer _notificationTimer;
         private bool _isShowingNotification = false;
         private HashSet<int> _shownNotificationIds = new HashSet<int>();
+        private string _lastSearchTerm = string.Empty;
+        private DateTime? _lastDateFrom = null;
+        private DateTime? _lastDateTo = null;
+        private readonly ApiService _apiService;
 
         public MainWindow()
         {
             InitializeComponent();
+
+            _apiService = new ApiService();
 
             TitleTextBox.GotFocus += (s, e) =>
             {
@@ -66,11 +71,11 @@ namespace WpfApp22
             HourComboBox.SelectedIndex = DateTime.Now.Hour;
 
             // Инициализация минут (0–59)
-            for (int i = 0; i < 60; i += 5) // С шагом 5 для удобства
+            for (int i = 0; i < 60; i += 1) // С шагом 1
             {
                 MinuteComboBox.Items.Add(i.ToString("D2"));
             }
-            MinuteComboBox.SelectedIndex = (DateTime.Now.Minute / 5);
+            MinuteComboBox.SelectedIndex = (DateTime.Now.Minute / 1);
 
             LoadUpcomingEventsAsync();
         }
@@ -80,11 +85,13 @@ namespace WpfApp22
         {
             try
             {
-                var events = await _apiService.GetUpcomingEventsAsync();
-                EventsList.ItemsSource = events;
+                // Явно запрашиваем ближайшие события через отдельный метод API
+                var upcomingEvents = await _apiService.GetUpcomingEventsAsync();
+                EventsList.ItemsSource = upcomingEvents;
 
-                // Инициализируем кэш: добавляем ID событий, для которых уведомление уже показано
-                foreach (var @event in events)
+                // Обновляем кэш уже показанных уведомлений
+                _shownNotificationIds.Clear();
+                foreach (var @event in upcomingEvents)
                 {
                     if (@event.IsNotificationShown)
                     {
@@ -94,7 +101,7 @@ namespace WpfApp22
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки: {ex.Message}");
+                MessageBox.Show($"Ошибка загрузки ближайших событий: {ex.Message}");
             }
         }
 
@@ -243,7 +250,7 @@ namespace WpfApp22
             DialogTitle.Text = "Редактирование события";
             TitleTextBox.Text = eventItem.Title;
             DatePicker.SelectedDate = eventItem.EventDate; // Программно устанавливаем дату из события
-            IsHolidayCheckBox.IsChecked = eventItem.IsHoliday;
+            IsHolidayCheckBox.IsChecked = eventItem.Annual;
             DescriptionTextBox.Text = eventItem.Description ?? string.Empty;
 
             // Обновляем видимость placeholder'ов при загрузке данных для редактирования
@@ -302,9 +309,15 @@ namespace WpfApp22
             {
                 Title = TitleTextBox.Text,
                 EventDate = eventDateTime,
-                IsHoliday = IsHolidayCheckBox.IsChecked ?? false,
+                Annual = IsHolidayCheckBox.IsChecked ?? false,
                 Description = DescriptionTextBox.Text
             };
+
+            if (eventDateTime < DateTime.Now)
+            {
+                MessageBox.Show("Дата и время события не могут быть в прошлом");
+                return;
+            }
 
             try
             {
@@ -329,12 +342,6 @@ namespace WpfApp22
             finally
             {
                 Mouse.OverrideCursor = null;
-            }
-
-            if (eventDateTime < DateTime.Now)
-            {
-                MessageBox.Show("Дата и время события не могут быть в прошлом");
-                return;
             }
         }
 
@@ -417,6 +424,102 @@ namespace WpfApp22
 
             // Останавливаем таймер уведомлений
             _notificationTimer?.Stop();
+        }
+
+
+
+        // Обработчик изменения текста поиска
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _lastSearchTerm = SearchTextBox.Text.Trim();
+        }
+
+        // Обработчики фокусов для placeholder’а
+        private void SearchTextBox_GotFocus(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(SearchTextBox.Text) || SearchTextBox.Text == "Введите название или описание")
+            {
+                SearchTextBox.Text = string.Empty;
+                SearchTextBox.Foreground = Brushes.Black;
+            }
+        }
+
+        private void SearchTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(SearchTextBox.Text))
+            {
+                SearchTextBox.Text = "Введите название или описание";
+                SearchTextBox.Foreground = Brushes.Gray;
+            }
+        }
+
+        // Обработка нажатия кнопки «Найти»
+        private async void SearchEvents_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Очистка плейсхолдера перед использованием
+                string searchTerm = SearchTextBox.Text.Trim();
+                if (searchTerm == "Введите название или описание" || string.IsNullOrWhiteSpace(searchTerm))
+                {
+                    searchTerm = string.Empty;
+                }
+
+                DateTime? dateFrom = DateFromPicker.SelectedDate;
+                DateTime? dateTo = DateToPicker.SelectedDate;
+
+                // Валидация диапазона дат
+                if (dateFrom.HasValue && dateTo.HasValue && dateFrom > dateTo)
+                {
+                    MessageBox.Show("Дата «от» не может быть позже даты «до»");
+                    return;
+                }
+
+                _lastSearchTerm = searchTerm;
+                _lastDateFrom = dateFrom;
+                _lastDateTo = dateTo;
+
+                var events = await _apiService.SearchEventsAsync(
+                    _lastSearchTerm,
+                    dateFrom,
+                    dateTo
+                );
+
+                EventsList.ItemsSource = events;
+
+                if (!events.Any())
+                {
+                    MessageBox.Show("По вашему запросу ничего не найдено");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка поиска: {ex.Message}");
+            }
+        }
+
+        // Обработка сброса поиска
+        private async void ResetSearch_Click(object sender, RoutedEventArgs e)
+        {
+            // Очищаем поля поиска
+            SearchTextBox.Text = "Введите название или описание";
+            SearchTextBox.Foreground = Brushes.Gray;
+            DateFromPicker.SelectedDate = null;
+            DateToPicker.SelectedDate = null;
+
+            // Сбрасываем сохранённые параметры поиска
+            _lastSearchTerm = string.Empty;
+            _lastDateFrom = null;
+            _lastDateTo = null;
+
+            // Полностью очищаем список событий в интерфейсе
+            EventsList.ItemsSource = new List<Event>();
+
+            // Также очищаем кэш уже показанных уведомлений
+            _shownNotificationIds.Clear();
+
+            // Показываем информационное сообщение
+            MessageBox.Show("Список событий очищен. Используйте поиск или загрузите ближайшие события.");
         }
     }
 }

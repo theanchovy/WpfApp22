@@ -3,18 +3,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WpfApp22"
         mc:Ignorable="d"
-        Title="Планировщик событий" Height="450" Width="800">
+        Title="Планировщик событий" Height="550" Width="800">
 
     <Grid Margin="10">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Панель кнопок управления -->
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,10">
             <Button Content="Загрузить ближайшие события"
                     AutomationProperties.Name="Загрузить список ближайших событий"
                     Click="LoadUpcomingEvents_Click"
@@ -36,8 +38,38 @@
             MinWidth="80" Padding="10,5"/>
         </StackPanel>
 
+        <!-- Панель поиска -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,15">
+            <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+            <TextBox x:Name="SearchTextBox"
+             Height="25"
+             Margin="0,0,10,0"
+             Padding="5"
+             Background="White"
+             Text="Введите название или описание"
+             GotFocus="SearchTextBox_GotFocus"
+             LostFocus="SearchTextBox_LostFocus"
+             TextChanged="SearchTextBox_TextChanged"/>
+
+            <TextBlock Text="от" VerticalAlignment="Center" Margin="10,0,5,0"/>
+            <DatePicker x:Name="DateFromPicker"
+               Margin="0,0,10,0"
+               VerticalAlignment="Center"/>
+
+            <TextBlock Text="до" VerticalAlignment="Center" Margin="0,0,5,0"/>
+            <DatePicker x:Name="DateToPicker"
+               VerticalAlignment="Center"/>
+
+            <Button Content="Найти"
+            Click="SearchEvents_Click"
+            MinWidth="80" Padding="10,5" Margin="10,0,10,0"/>
+            <Button Content="Сбросить"
+            Click="ResetSearch_Click"
+            MinWidth="80" Padding="10,5"/>
+        </StackPanel>
+
         <!-- Список событий -->
-        <ListView x:Name="EventsList" Grid.Row="1" Margin="0,10,0,10"
+        <ListView x:Name="EventsList" Grid.Row="2" Margin="0,10,0,10"
                  SelectionMode="Single">
             <ListView.View>
                 <GridView>
@@ -49,9 +81,15 @@
                     <GridViewColumn Header="Название"
                 DisplayMemberBinding="{Binding Title}"
                 Width="250"/>
-                    <GridViewColumn Header="Праздник"
-                DisplayMemberBinding="{Binding IsHoliday}"
-                Width="80"/>
+                    <GridViewColumn Header="Ежегодное" Width="80">
+                        <GridViewColumn.DisplayMemberBinding>
+                            <Binding Path="Annual">
+                                <Binding.Converter>
+                                    <local:BooleanToYesNoConverter />
+                                </Binding.Converter>
+                            </Binding>
+                        </GridViewColumn.DisplayMemberBinding>
+                    </GridViewColumn>
                     <GridViewColumn Header="Описание"
                 DisplayMemberBinding="{Binding Description}"
                 Width="300"/>
@@ -60,7 +98,7 @@
         </ListView>
 
         <!-- Диалоговое окно для добавления/редактирования -->
-        <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1"
+        <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1"
                Background="LightBlue" Padding="15" Visibility="Collapsed"
                x:Name="EventDialog" Opacity="0">
             <Border.Style>
@@ -71,7 +109,7 @@
                                 <BeginStoryboard>
                                     <Storyboard>
                                         <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                      From="0" To="1" Duration="0:0:0.2"/>
+                          From="0" To="1" Duration="0:0:0.2"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
@@ -98,58 +136,32 @@
 
                 <!-- Выбор даты -->
                 <DatePicker x:Name="DatePicker" Margin="0,0,0,10"/>
-                
+
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,10">
-                    <TextBlock Text="Время:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                    <ComboBox x:Name="HourComboBox" Width="50" Margin="0,0,10,0"/>
+                    <TextBlock Text="Время:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <ComboBox x:Name="HourComboBox" Width="60" VerticalAlignment="Center"/>
                     <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                    <ComboBox x:Name="MinuteComboBox" Width="50"/>
+                    <ComboBox x:Name="MinuteComboBox" Width="60" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Margin="0,5,0,0">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Text" Value="{Binding EventDate, StringFormat='Дата: dd.MM.yyyy HH:mm'}"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsNotificationShown}" Value="False">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
+                <CheckBox x:Name="IsHolidayCheckBox" Content="Ежегодное событие" Margin="0,10,0,10"/>
 
-                <!-- Чекбокс для отметки праздника -->
-                <CheckBox x:Name="IsHolidayCheckBox" Content="Это праздник" Margin="0,0,0,10"/>
-
-                <!-- Подпись для поля описания -->
-                <TextBlock Text="Описание события (необязательно):"
-                   Margin="0,0,0,5" FontWeight="Normal" Foreground="Gray"/>
-
-                <!-- Поле для описания -->
+                <!-- Поле для описания события -->
                 <TextBox x:Name="DescriptionTextBox"
-                         Height="60"
-                         TextWrapping="Wrap"
-                         AcceptsReturn="True"
-                         VerticalScrollBarVisibility="Auto"
-                         Margin="0,0,0,15"
-                         BorderThickness="1"
-                         Padding="5"
-                         Background="White"
-                         Foreground="LightGray"
-                         Text="Введите описание события..."
-                         TextChanged="DescriptionTextBox_TextChanged"
-                         GotFocus="DescriptionTextBox_GotFocus"
-                         LostFocus="DescriptionTextBox_LostFocus"/>
+                        Height="80"
+                        Margin="0,0,0,10"
+                        Padding="5"
+                        Background="White"
+                        Foreground="Gray"
+                        Text="Введите описание события..."
+                        TextChanged="DescriptionTextBox_TextChanged"
+                        GotFocus="DescriptionTextBox_GotFocus"
+                        LostFocus="DescriptionTextBox_LostFocus"/>
 
-                <!-- Панель кнопок в диалоговом окне -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Content="Сохранить"
-                    AutomationProperties.Name="Сохранить событие"
-            Click="SaveEvent_Click" MinWidth="80" Padding="10,5" Margin="0,0,10,0"/>
-                    <Button Content="Отмена"
-            AutomationProperties.Name="Отмена операции"
-            Click="CancelDialog_Click" IsCancel="True" MinWidth="80" Padding="10,5"/>
+                <!-- Панель кнопок диалога -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                    <Button Content="Сохранить" x:Name="SaveEventButton" Click="SaveEvent_Click" MinWidth="80" Padding="10,5" Margin="0,0,10,0"/>
+                    <Button Content="Отмена" Click="CancelDialog_Click" MinWidth="80" Padding="10,5"/>
                 </StackPanel>
             </StackPanel>
         </Border>
