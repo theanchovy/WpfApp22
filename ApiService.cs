@@ -19,7 +19,6 @@ public class ApiService
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,
-        //Converters = { new DateTimeConverterUsingDateTimeParse() }
     };
 
     public async Task<List<Event>> GetUpcomingEventsAsync()

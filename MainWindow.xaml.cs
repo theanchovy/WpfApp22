@@ -11,7 +11,7 @@ namespace WpfApp22
     {
         private bool _isTitlePlaceholder = true;
         private bool _isDescriptionPlaceholder = true;
-        private Event? _selectedEvent; // Для редактирования
+        private Event? _selectedEvent; 
         private DispatcherTimer _notificationTimer;
         private bool _isShowingNotification = false;
         private HashSet<int> _shownNotificationIds = new HashSet<int>();
@@ -19,6 +19,7 @@ namespace WpfApp22
         private DateTime? _lastDateFrom = null;
         private DateTime? _lastDateTo = null;
         private readonly ApiService _apiService;
+        private bool _isAuthorized = false;
 
         public MainWindow()
         {
@@ -171,51 +172,108 @@ namespace WpfApp22
             await LoadUpcomingEventsAsync();
         }
 
+        // Показывает диалог ввода пароля. Возвращает true, если пароль верный.
+        private bool PromptForPassword(Window owner)
+        {
+            var dialog = new PasswordDialog();
+            if (dialog.ShowAndWait(owner) != true)
+                return false;
+
+            string entered = dialog.PasswordBox.Password;
+            string expected = App.Settings!.Security!.AdminPassword!;
+
+            return entered == expected;
+        }
+
+        // Проверяет авторизацию. Если сессии нет — запрашивает пароль.
+        private async Task EnsureAuthorizedAsync()
+        {
+            if (_isAuthorized)
+                return;
+
+            if (!PromptForPassword(this))
+                throw new UnauthorizedAccessException("Доступ запрещён: неверный пароль или отмена.");
+
+            _isAuthorized = true;
+        }
+
+
         // Кнопка «Добавить событие»
         private void AddEvent_Click(object sender, RoutedEventArgs e)
         {
-            _selectedEvent = null;
-            ShowEventDialog();
+            try
+            {
+                EnsureAuthorizedAsync().Wait(); // Синхронно ждём завершения проверки
+                _selectedEvent = null;
+                ShowEventDialog();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                MessageBox.Show("Неверный пароль или отмена операции.", "Доступ запрещён");
+            }
         }
 
         // Кнопка «Редактировать»
         private void EditEvent_Click(object sender, RoutedEventArgs e)
         {
-            if (EventsList.SelectedItem is Event selectedEvent)
+            if (!(EventsList.SelectedItem is Event selectedEvent))
             {
+                MessageBox.Show("Выберите событие для редактирования");
+                return;
+            }
+
+            try
+            {
+                EnsureAuthorizedAsync().Wait();
                 _selectedEvent = selectedEvent;
                 LoadEventToDialog(selectedEvent);
                 ShowEventDialog();
             }
-            else
+            catch (UnauthorizedAccessException)
             {
-                MessageBox.Show("Выберите событие для редактирования");
+                MessageBox.Show("Неверный пароль или отмена операции.", "Доступ запрещён");
             }
         }
 
         // Кнопка «Удалить»
         private async void DeleteEvent_Click(object sender, RoutedEventArgs e)
         {
-            if (EventsList.SelectedItem is Event eventToDelete)
-            {
-                if (MessageBox.Show($"Удалить событие '{eventToDelete.Title}'?",
-                    "Подтверждение удаления",
-            MessageBoxButton.YesNo) == MessageBoxResult.Yes)
-                {
-                    try
-                    {
-                        await _apiService.DeleteEventAsync(eventToDelete.Id);
-                        await LoadUpcomingEventsAsync(); // Перезагрузка списка
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Ошибка удаления: {ex.Message}");
-                    }
-                }
-            }
-            else
+            if (!(EventsList.SelectedItem is Event eventToDelete))
             {
                 MessageBox.Show("Выберите событие для удаления");
+                return;
+            }
+
+            // Сначала подтверждение удаления
+            var result = MessageBox.Show(
+                $"Удалить событие '{eventToDelete.Title}'?",
+                "Подтверждение удаления",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            // Потом проверка пароля
+            try
+            {
+                await EnsureAuthorizedAsync(); // Асинхронно
+            }
+            catch (UnauthorizedAccessException)
+            {
+                MessageBox.Show("Неверный пароль или отмена операции.", "Доступ запрещён");
+                return;
+            }
+
+            // Если дошли сюда — удаляем
+            try
+            {
+                await _apiService.DeleteEventAsync(eventToDelete.Id);
+                await LoadUpcomingEventsAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка удаления: {ex.Message}");
             }
         }
 
